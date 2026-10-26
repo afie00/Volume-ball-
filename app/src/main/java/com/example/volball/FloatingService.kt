@@ -13,6 +13,7 @@ import android.view.*
 import android.widget.*
 
 class FloatingService : Service() {
+    companion object { @Volatile var running = false }
     private lateinit var wm: WindowManager
     private lateinit var am: AudioManager
     private lateinit var ball: TextView
@@ -43,6 +44,7 @@ class FloatingService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        running = true
         wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         startForeground(1, notification())
@@ -207,6 +209,7 @@ class FloatingService : Service() {
     private fun resetClose() { h.removeCallbacks(autoClose); h.postDelayed(autoClose, 3500) }
 
     override fun onDestroy() {
+        running = false
         closePanel()
         try { wm.removeView(ball) } catch (_: Exception) {}
         super.onDestroy()
