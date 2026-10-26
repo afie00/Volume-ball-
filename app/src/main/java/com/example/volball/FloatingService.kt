@@ -31,7 +31,9 @@ class FloatingService : Service() {
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
-    private val stream = AudioManager.STREAM_MUSIC
+    private var stream = AudioManager.STREAM_MUSIC
+    private val names = listOf("Media" to AudioManager.STREAM_MUSIC, "Ring" to AudioManager.STREAM_RING, "Alarm" to AudioManager.STREAM_ALARM)
+    private var nameIdx = 0
     private fun type() = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
     private fun lp(w: Int, hh: Int) = WindowManager.LayoutParams(
         w, hh, type(), WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT
@@ -113,19 +115,36 @@ class FloatingService : Service() {
         ball.postDelayed({ if (!open) ball.animate().alpha(0.6f).setDuration(500).start() }, 2500)
     }
 
+    private fun roundBtn(label: String, onClick: () -> Unit) = TextView(this).apply {
+        text = label; textSize = 24f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
+        background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.argb(200, 232, 40, 63)) }
+        setOnClickListener { performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY); onClick(); resetClose() }
+    }
+
+    private fun step(dir: Int) {
+        try { am.adjustStreamVolume(stream, dir, AudioManager.FLAG_SHOW_UI) } catch (_: Exception) {}
+        h.postDelayed({ refresh() }, 80)
+    }
+
+    private fun setVol(v: Int) { try { am.setStreamVolume(stream, v, 0) } catch (_: Exception) {} }
+
     private fun buildPanel() {
-        val w = resources.displayMetrics.widthPixels - dp(32)
+        val w = resources.displayMetrics.widthPixels - dp(24)
         panel = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(16), dp(10), dp(18), dp(10))
+            setPadding(dp(12), dp(10), dp(14), dp(10))
             background = GradientDrawable().apply {
                 cornerRadius = dp(32).toFloat()
                 setColor(Color.argb(235, 18, 18, 26)); setStroke(dp(1), Color.argb(130, 255, 59, 80))
             }
         }
         mute = TextView(this).apply {
-            textSize = 22f; gravity = Gravity.CENTER
-            setOnClickListener { toggleMute() }
+            textSize = 12f; setTextColor(Color.WHITE); gravity = Gravity.CENTER
+            background = GradientDrawable().apply { cornerRadius = dp(16).toFloat(); setColor(Color.argb(90, 255, 255, 255)) }
+            setOnClickListener {
+                nameIdx = (nameIdx + 1) % names.size; stream = names[nameIdx].second
+                seek.max = am.getStreamMaxVolume(stream); refresh(); resetClose()
+            }
         }
         seek = SeekBar(this).apply {
             max = am.getStreamMaxVolume(stream)
@@ -133,36 +152,33 @@ class FloatingService : Service() {
             progressTintList = red; thumbTintList = red
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(s: SeekBar, p: Int, user: Boolean) {
-                    if (user) { am.setStreamVolume(stream, p, 0); s.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK); resetClose() }
+                    if (user) { setVol(p); s.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK) }
                     updateLabels(p)
                 }
                 override fun onStartTrackingTouch(s: SeekBar) { h.removeCallbacks(autoClose) }
                 override fun onStopTrackingTouch(s: SeekBar) { resetClose() }
             })
         }
-        pct = TextView(this).apply { setTextColor(Color.WHITE); textSize = 14f; gravity = Gravity.END }
-        panel.addView(mute, LinearLayout.LayoutParams(dp(36), dp(36)))
-        panel.addView(seek, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(8); marginEnd = dp(8) })
-        panel.addView(pct, LinearLayout.LayoutParams(dp(44), ViewGroup.LayoutParams.WRAP_CONTENT))
-        panelLp = lp(w, ViewGroup.LayoutParams.WRAP_CONTENT).apply { x = dp(16) }
+        pct = TextView(this).apply { setTextColor(Color.WHITE); textSize = 13f; gravity = Gravity.END }
+        val minus = roundBtn("\u2212") { step(AudioManager.ADJUST_LOWER) }
+        val plus = roundBtn("+") { step(AudioManager.ADJUST_RAISE) }
+        panel.addView(mute, LinearLayout.LayoutParams(dp(54), dp(32)))
+        panel.addView(minus, LinearLayout.LayoutParams(dp(40), dp(40)).apply { marginStart = dp(8) })
+        panel.addView(seek, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = dp(6); marginEnd = dp(6) })
+        panel.addView(plus, LinearLayout.LayoutParams(dp(40), dp(40)))
+        panel.addView(pct, LinearLayout.LayoutParams(dp(40), ViewGroup.LayoutParams.WRAP_CONTENT))
+        panelLp = lp(w, ViewGroup.LayoutParams.WRAP_CONTENT).apply { x = dp(12) }
     }
 
     private fun updateLabels(p: Int) {
-        pct.text = "${p * 100 / seek.max}%"
-        mute.text = if (p == 0) "\uD83D\uDD07" else "\uD83D\uDD0A"
+        pct.text = "${p * 100 / maxOf(seek.max, 1)}%"
+        mute.text = names[nameIdx].first
     }
 
     private fun refresh() {
         val v = am.getStreamVolume(stream)
         if (seek.progress != v) seek.progress = v
         updateLabels(v)
-    }
-
-    private fun toggleMute() {
-        val cur = am.getStreamVolume(stream)
-        if (cur > 0) { lastVol = cur; am.setStreamVolume(stream, 0, 0) }
-        else am.setStreamVolume(stream, maxOf(lastVol, 1), 0)
-        refresh(); resetClose()
     }
 
     private fun toggle() = if (open) closePanel() else openPanel()
